@@ -47,6 +47,7 @@ import os
 import re
 import shutil
 import socketserver
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -385,6 +386,40 @@ def page_furniture_overlay(chapters: list[str], size: tuple[float, float]) -> Pd
     return PdfReader(buf)
 
 
+def compress_with_ghostscript(src: Path) -> bool:
+    """Re-subset fonts across the whole document with Ghostscript, in place.
+
+    Chrome prints each page with its own embedded font subset; merging 300+ of
+    them leaves the file dominated by duplicate fonts (~20 MB). Ghostscript
+    rebuilds one shared subset and re-packs the streams, cutting ~6x with no
+    visible quality loss — text stays vector, and mermaid/math SVG + the PDF
+    outline are preserved. No-op (returns False) if `gs` isn't on PATH, so the
+    pipeline still produces a valid PDF without it. Skip with PDF_NO_GS=1.
+    """
+    if os.environ.get("PDF_NO_GS") == "1":
+        return False
+    gs = shutil.which("gs") or shutil.which("gswin64c")
+    if not gs:
+        print("  (ghostscript not found — skipping PDF compression)")
+        return False
+    tmp = src.with_suffix(".gs.pdf")
+    cmd = [gs, "-q", "-dNOPAUSE", "-dBATCH", "-dSAFER", "-sDEVICE=pdfwrite",
+           "-dCompatibilityLevel=1.7", "-dPDFSETTINGS=/prepress",
+           "-dDetectDuplicateImages=true", "-dSubsetFonts=true", "-dCompressFonts=true",
+           f"-sOutputFile={tmp}", str(src)]
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as e:
+        print(f"  (ghostscript compression failed, keeping uncompressed: {e})")
+        tmp.unlink(missing_ok=True)
+        return False
+    if tmp.exists() and tmp.stat().st_size > 0:
+        tmp.replace(src)
+        return True
+    tmp.unlink(missing_ok=True)
+    return False
+
+
 def main() -> None:
     manifest = json.loads(MANIFEST.read_text())
     limit = int(os.environ.get("PDF_LIMIT", "0"))
@@ -577,6 +612,9 @@ def main() -> None:
     manual = OUT / "zensical-manual.pdf"
     with open(manual, "wb") as f:
         writer.write(f)
+    raw_kb = manual.stat().st_size // 1024
+    compressed = compress_with_ghostscript(manual)
+    final_kb = manual.stat().st_size // 1024
 
     dt = time.time() - t0
     fm = len(title_pdf.pages) + len(toc_pdf.pages) + len(tof_pdf.pages)
@@ -587,7 +625,10 @@ def main() -> None:
     print(f"front matter:    {fm} sheets (title {len(title_pdf.pages)}, "
           f"contents {len(toc_pdf.pages)}, figures {len(tof_pdf.pages)})")
     print(f"body:            {body_sheet_total} numbered sheets")
-    print(f"combined manual: {manual} ({len(writer.pages)} sheets, {manual.stat().st_size // 1024} KB)")
+    if compressed:
+        print(f"compression:     {raw_kb} KB -> {final_kb} KB via ghostscript "
+              f"(-{round(100 * (raw_kb - final_kb) / raw_kb)}%)")
+    print(f"combined manual: {manual} ({len(writer.pages)} sheets, {final_kb} KB)")
 
 
 if __name__ == "__main__":

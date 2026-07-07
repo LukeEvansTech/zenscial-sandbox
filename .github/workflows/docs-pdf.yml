@@ -39,6 +39,9 @@ jobs:
           # Playwright's bundled Chromium (make_pdfs.py uses it when
           # PDF_CHROME_CHANNEL=chromium; locally it defaults to system Chrome).
           python -m playwright install --with-deps chromium
+          # Ghostscript re-subsets fonts across the merged PDF (~6x smaller).
+          # Usually preinstalled on ubuntu-latest; install only if missing.
+          which gs || sudo apt-get install -y ghostscript
 
       - name: Build site (zensical)
         run: zensical build
