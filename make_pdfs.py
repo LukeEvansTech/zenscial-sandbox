@@ -189,6 +189,17 @@ def mermaid_caption(src: str) -> str:
     return "Diagram"
 
 
+def strip_section_prefix(title: str, section: str | None) -> str:
+    """TOC/figure sub-entries are nested under their section, so drop a leading
+    "<Section> — " prefix (Getting Started — Topic 3  ->  Topic 3)."""
+    if section:
+        for sep in (" — ", " – ", " - ", ": "):
+            pre = section + sep
+            if title.startswith(pre):
+                return title[len(pre):]
+    return title
+
+
 def theme_head() -> str:
     """Reuse the built site's stylesheet/font tags so front matter matches."""
     raw = (SITE / "index.html").read_text()
@@ -212,13 +223,17 @@ body { margin:0; }
 .title-page img { width:58%; max-width:340px; margin:2.4rem 0; }
 .title-page .rule { width:64px; height:4px; background:#4f46e5; border-radius:2px; margin:1.4rem 0; }
 .title-page .meta { margin-top:1.8rem; color:#6b7280; font-size:.86rem; line-height:1.7; }
-h2.fm-h { font-size:1.7rem; border-bottom:2px solid #4f46e5; padding-bottom:.35rem; margin:0 0 1.2rem; }
-.entry { display:flex; align-items:baseline; margin:.26rem 0; font-size:.94rem; }
-.entry.section { font-weight:700; margin-top:1rem; font-size:1rem; }
+h2.fm-h { font-size:1.6rem; border-bottom:2px solid #4f46e5; padding-bottom:.3rem; margin:0 0 1rem; }
+.entry { display:flex; align-items:baseline; margin:.07rem 0; font-size:.92rem; line-height:1.35; }
+.entry.section { font-weight:700; margin-top:.6rem; margin-bottom:.02rem; font-size:.97rem; }
+.entry.section .ti { color:#111827; }
 .entry.sub { padding-left:1.5rem; color:#374151; }
-.entry .lead { flex:1 1 auto; border-bottom:1px dotted #b8bcc4; margin:0 .45rem; position:relative; top:-.28rem; }
-.entry .pg { flex:0 0 auto; font-variant-numeric:tabular-nums; color:#374151; }
-.entry .fn { flex:0 0 auto; font-weight:600; color:#4f46e5; margin-right:.55rem;
+.entry .ti { flex:0 1 auto; }
+.entry .lead { flex:1 1 auto; min-width:1.4rem; border-bottom:1.5px dotted #c7ccd4;
+    margin:0 .5rem; position:relative; top:-.2rem; }
+.entry .pg { flex:0 0 auto; min-width:1.6rem; text-align:right;
+    font-variant-numeric:tabular-nums; color:#4b5563; }
+.entry .fn { flex:0 0 3.4rem; font-weight:600; color:#4f46e5;
     font-variant-numeric:tabular-nums; }
 """
 
@@ -329,12 +344,17 @@ def main() -> None:
     fig_entries: list[tuple[int, str, int]] = []
     running_page = 1
     figno = 0
+    current_section: str | None = None
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(**launch_kwargs)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         for i, item in enumerate(manifest):
             url, title = item["url"], item["title"]
+            is_cover = url == ""
+            is_section = bool(re.fullmatch(r"section-\d+/", url))
+            if is_section:
+                current_section = title
             page.goto(f"http://127.0.0.1:{port}/{url}", wait_until="load", timeout=60000)
 
             math_state = page.evaluate(MATHJAX_JS)
@@ -364,7 +384,8 @@ def main() -> None:
                     short = mermaid_caption(defs[di] if di < len(defs) else "")
                     di += 1
                 labels.append(f"Figure {figno}. {short}")
-                local_figs.append((figno, f"{title} — {short}"))
+                where = strip_section_prefix(title, current_section) if not is_cover else title
+                local_figs.append((figno, f"{where} — {short}"))
             if labels:
                 page.evaluate(FIGURE_LABEL_JS, labels)
             fracs = page.evaluate(FIGURE_FRACS_JS) if local_figs else []
@@ -379,12 +400,12 @@ def main() -> None:
             page_start = running_page
 
             # TOC entry: cover -> top level; section index -> section; else -> sub page.
-            if url == "":
+            if is_cover:
                 toc_entries.append(("cover", "Overview", page_start))
-            elif re.fullmatch(r"section-\d+/", url):
+            elif is_section:
                 toc_entries.append(("section", title, page_start))
             else:
-                toc_entries.append(("page", title, page_start))
+                toc_entries.append(("page", strip_section_prefix(title, current_section), page_start))
 
             # Figure entries: page = page_start + fractional position * sheets.
             for (num, caption), frac in zip(local_figs, fracs):
