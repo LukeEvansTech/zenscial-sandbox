@@ -1,26 +1,38 @@
 #!/usr/bin/env python3
-"""Build-to-PDF pipeline for the zensical test site.
+"""Build-to-PDF pipeline for the zensical test site — as a proper document.
 
 Since zensical has no native PDF export, this serves the built site over HTTP
-and drives headless Chrome (system Chrome, via Playwright) to print each page
-to PDF. Two things need help along the way:
+and drives headless Chrome (Playwright) to print each page to PDF, then assembles
+a real document:
 
-  * mermaid  - zensical 0.0.47's theme bundle empties the <pre class="mermaid">
-               blocks in a headless context without producing an <svg>, so we
-               re-render each diagram ourselves from the source that survives in
-               the on-disk HTML, using the mermaid library the page already
-               loaded.
-  * math     - arithmatex (generic) needs MathJax; we await MathJax typesetting
-               before printing.
+    [ title page ] [ table of contents ] [ table of figures ] [ numbered body ]
+
+Along the way it handles the two things zensical's headless output gets wrong:
+
+  * mermaid  - the theme bundle empties <pre class="mermaid"> blocks in a headless
+               context without producing an <svg>, so we re-render each diagram
+               from the source that survives in the on-disk HTML.
+  * math     - arithmatex (generic) needs MathJax; we await typesetting.
+
+Front matter (title/TOC/figures) is rendered as themed HTML through the SAME
+Chrome pipeline, so it matches the site's typography. Continuous page numbers are
+stamped onto the body sheets with reportlab. The TOC and figure page numbers are
+computed exactly from per-page sheet counts.
 
 Outputs:
   pdfs/pages/NNN.pdf        one PDF per doc page
-  pdfs/zensical-manual.pdf  all pages merged, one bookmark per page
+  pdfs/zensical-manual.pdf  the assembled document (bookmarked + page-numbered)
+
+Env:
+  PDF_CHROME_CHANNEL=chromium   use Playwright's bundled Chromium (CI); default: system Chrome
+  FIT_WIDE_TABLES=1             shrink+wrap wide tables so they don't clip
+  PDF_LIMIT=N                   only process the first N pages (smoke test)
 """
 from __future__ import annotations
 
 import html
 import http.server
+import io
 import json
 import os
 import re
@@ -32,6 +44,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 from pypdf import PdfReader, PdfWriter
+from reportlab.pdfgen import canvas
 
 ROOT = Path(__file__).resolve().parent
 SITE = ROOT / "site"
@@ -39,10 +52,14 @@ OUT = ROOT / "pdfs"
 PAGES_DIR = OUT / "pages"
 MANIFEST = ROOT / "docs" / "manifest.json"
 
+DOC_TITLE = "Zensical PDF Stress Test"
+DOC_SUBTITLE = "A synthetic ~100-page documentation site, rendered end-to-end as a PDF"
+
 # Strip navigation chrome so each printed page is just the article, full width.
 PRINT_CSS = """
 .md-header, .md-sidebar, .md-tabs, .md-footer, .md-content__button,
-.md-top, .md-source, [data-md-component=announce], .md-nav { display:none !important; }
+.md-clipboard, .md-top, .md-source, [data-md-component=announce], .md-nav { display:none !important; }
+.md-typeset button, .highlight button, .md-typeset pre button { display:none !important; }
 .md-main__inner, .md-content { margin:0 !important; max-width:none !important; }
 .md-content__inner { padding-top:0 !important; }
 .md-grid { max-width:none !important; }
@@ -50,8 +67,6 @@ PRINT_CSS = """
 
 # Wide tables (5-6 columns) are wider than an A4 page, so their last column is
 # clipped at the page edge (on screen Material scrolls them; print can't).
-# Set FIT_WIDE_TABLES=1 to force every table to fit the page by shrinking the
-# font and wrapping cells. Off by default so the PDF shows the true default look.
 FIT_TABLES_CSS = """
 .md-typeset__scrollwrap, .md-typeset__table { overflow: visible !important; }
 .md-typeset table:not([class]) { width:100% !important; font-size:0.62rem !important;
@@ -62,7 +77,6 @@ FIT_TABLES_CSS = """
 
 MERMAID_RE = re.compile(r'<pre class="mermaid"><code[^>]*>(.*?)</code></pre>', re.S)
 
-# Re-render mermaid from extracted source using the page's own mermaid library.
 MERMAID_JS = r"""async (defs) => {
     if (!window.mermaid) return 'no-lib';
     try { window.mermaid.initialize({startOnLoad:false, securityLevel:'loose'}); } catch(e){}
@@ -96,6 +110,56 @@ MATHJAX_JS = r"""async () => {
     return 'no-mathjax';
 }"""
 
+# Figures = content images (assets/*.svg) + rendered mermaid diagrams, in DOM order.
+# Query the kinds/alts of the figures on the page (DOM order).
+FIGURE_KINDS_JS = r"""() => {
+    const a = document.querySelector('.md-content__inner') || document.body;
+    const nodes = [...a.querySelectorAll('img, .mermaid')].filter(n =>
+        n.tagName !== 'IMG' || /assets\//.test(n.getAttribute('src')||''));
+    return nodes.map(n => ({ kind: n.tagName === 'IMG' ? 'image' : 'mermaid',
+                             alt: n.tagName === 'IMG' ? (n.getAttribute('alt')||'') : '' }));
+}"""
+
+# Inject "Figure N. caption" captions under each figure (DOM order). For images the
+# markdown already renders a "*Figure: ...*" line, so we replace that instead of
+# doubling up; mermaid diagrams get a fresh caption inserted.
+FIGURE_LABEL_JS = r"""(labels) => {
+    const a = document.querySelector('.md-content__inner') || document.body;
+    const nodes = [...a.querySelectorAll('img, .mermaid')].filter(n =>
+        n.tagName !== 'IMG' || /assets\//.test(n.getAttribute('src')||''));
+    const style = 'font-size:.78rem;color:#5b6270;font-style:italic;text-align:center;margin:.35rem 0 1.1rem';
+    nodes.forEach((n, i) => {
+        if (i >= labels.length) return;
+        let existing = null;
+        if (n.tagName === 'IMG') {
+            const host = n.closest('p') || n;
+            const sib = host.nextElementSibling;
+            if (sib && /^(P|EM)$/.test(sib.tagName) && /figure/i.test(sib.textContent)) existing = sib;
+        }
+        if (existing) {
+            existing.textContent = labels[i];
+            existing.style.cssText = style;
+        } else {
+            const cap = document.createElement('p');
+            cap.textContent = labels[i];
+            cap.style.cssText = style;
+            const host = (n.tagName === 'IMG') ? (n.closest('p') || n) : n;
+            host.insertAdjacentElement('afterend', cap);
+        }
+    });
+}"""
+
+# After labelling, measure each figure's fractional position through the article.
+FIGURE_FRACS_JS = r"""() => {
+    const a = document.querySelector('.md-content__inner') || document.body;
+    const at = a.getBoundingClientRect().top + window.scrollY;
+    const ah = a.scrollHeight || 1;
+    const nodes = [...a.querySelectorAll('img, .mermaid')].filter(n =>
+        n.tagName !== 'IMG' || /assets\//.test(n.getAttribute('src')||''));
+    return nodes.map(n => Math.max(0, Math.min(1,
+        ((n.getBoundingClientRect().top + window.scrollY) - at) / ah)));
+}"""
+
 
 def start_server() -> socketserver.TCPServer:
     os.chdir(SITE)
@@ -111,6 +175,135 @@ def extract_mermaid(url: str) -> list[str]:
     return [html.unescape(m) for m in MERMAID_RE.findall(raw)]
 
 
+def mermaid_caption(src: str) -> str:
+    line = (src.strip().splitlines() or [""])[0].strip()
+    low = line.lower()
+    if low.startswith("pie"):
+        title = line.split("title", 1)[1].strip().strip('"') if "title" in low else "Pie chart"
+        return f"{title} (pie chart)"
+    for key, label in (("sequencediagram", "Sequence diagram"), ("classdiagram", "Class diagram"),
+                       ("statediagram", "State diagram"), ("erdiagram", "ER diagram"),
+                       ("gantt", "Gantt chart"), ("flowchart", "Flowchart"), ("graph", "Flowchart")):
+        if low.startswith(key):
+            return label
+    return "Diagram"
+
+
+def theme_head() -> str:
+    """Reuse the built site's stylesheet/font tags so front matter matches."""
+    raw = (SITE / "index.html").read_text()
+    head = re.search(r"<head[^>]*>(.*?)</head>", raw, re.S)
+    if not head:
+        return ""
+    inner = head.group(1)
+    tags = re.findall(r"<link\b[^>]*>", inner) + re.findall(r"<style\b[^>]*>.*?</style>", inner, re.S)
+    return "\n".join(tags)
+
+
+FRONT_CSS = """
+body { margin:0; }
+.page { padding: 2.4cm 2.2cm; box-sizing:border-box; }
+.title-page { min-height: 100vh; display:flex; flex-direction:column;
+    justify-content:center; align-items:center; text-align:center; }
+.title-page .kicker { text-transform:uppercase; letter-spacing:.18em; font-size:.72rem;
+    color:#4f46e5; font-weight:700; margin-bottom:1.2rem; }
+.title-page h1 { font-size:2.7rem; line-height:1.15; margin:.1em 0 .3em; }
+.title-page .subtitle { font-size:1.15rem; color:#5b6270; max-width:26em; }
+.title-page img { width:58%; max-width:340px; margin:2.4rem 0; }
+.title-page .rule { width:64px; height:4px; background:#4f46e5; border-radius:2px; margin:1.4rem 0; }
+.title-page .meta { margin-top:1.8rem; color:#6b7280; font-size:.86rem; line-height:1.7; }
+h2.fm-h { font-size:1.7rem; border-bottom:2px solid #4f46e5; padding-bottom:.35rem; margin:0 0 1.2rem; }
+.entry { display:flex; align-items:baseline; margin:.26rem 0; font-size:.94rem; }
+.entry.section { font-weight:700; margin-top:1rem; font-size:1rem; }
+.entry.sub { padding-left:1.5rem; color:#374151; }
+.entry .lead { flex:1 1 auto; border-bottom:1px dotted #b8bcc4; margin:0 .45rem; position:relative; top:-.28rem; }
+.entry .pg { flex:0 0 auto; font-variant-numeric:tabular-nums; color:#374151; }
+.entry .fn { flex:0 0 auto; font-weight:600; color:#4f46e5; margin-right:.55rem;
+    font-variant-numeric:tabular-nums; }
+"""
+
+
+def front_page(head: str, body_html: str) -> str:
+    return (
+        '<!doctype html><html lang="en"><head><meta charset="utf-8">'
+        f"{head}<style>{FRONT_CSS}</style></head>"
+        f'<body class="md-typeset">{body_html}</body></html>'
+    )
+
+
+def title_html(head: str, n_pages: int, n_figs: int, date_str: str) -> str:
+    body = (
+        '<div class="page title-page">'
+        '<div class="kicker">Zensical · Documentation</div>'
+        f"<h1>{html.escape(DOC_TITLE)}</h1>"
+        '<div class="rule"></div>'
+        f'<p class="subtitle">{html.escape(DOC_SUBTITLE)}</p>'
+        '<img src="assets/diagram.svg" alt="">'
+        '<div class="meta">'
+        f"{n_pages} pages &nbsp;·&nbsp; {n_figs} figures<br>"
+        f"Generated by the <strong>zenscial-sandbox</strong> CI pipeline<br>"
+        f"{html.escape(date_str)}"
+        "</div></div>"
+    )
+    return front_page(head, body)
+
+
+def contents_html(head: str, entries: list[tuple[str, str, int]]) -> str:
+    rows = ['<div class="page"><h2 class="fm-h">Table of Contents</h2>']
+    for level, title, pg in entries:
+        cls = "section" if level == "section" else ("sub" if level == "page" else "")
+        rows.append(
+            f'<div class="entry {cls}"><span class="ti">{html.escape(title)}</span>'
+            f'<span class="lead"></span><span class="pg">{pg}</span></div>'
+        )
+    rows.append("</div>")
+    return front_page(head, "".join(rows))
+
+
+def figures_html(head: str, figs: list[tuple[int, str, int]]) -> str:
+    rows = ['<div class="page"><h2 class="fm-h">Table of Figures</h2>']
+    if not figs:
+        rows.append('<p style="color:#6b7280">No figures.</p>')
+    for num, caption, pg in figs:
+        rows.append(
+            f'<div class="entry"><span class="fn">Fig&nbsp;{num}</span>'
+            f'<span class="ti">{html.escape(caption)}</span>'
+            f'<span class="lead"></span><span class="pg">{pg}</span></div>'
+        )
+    rows.append("</div>")
+    return front_page(head, "".join(rows))
+
+
+def render_html_to_pdf(page, port: int, name: str, doc_html: str) -> PdfReader:
+    """Write a front-matter HTML file into the site, print it, then remove it."""
+    tmp = SITE / name
+    tmp.write_text(doc_html)
+    try:
+        page.goto(f"http://127.0.0.1:{port}/{name}", wait_until="load", timeout=60000)
+        page.wait_for_timeout(150)
+        data = page.pdf(
+            format="A4", print_background=True,
+            margin={"top": "1.5cm", "bottom": "1.5cm", "left": "1.4cm", "right": "1.4cm"},
+        )
+    finally:
+        tmp.unlink(missing_ok=True)
+    return PdfReader(io.BytesIO(data))
+
+
+def page_number_overlay(n: int, size: tuple[float, float]) -> PdfReader:
+    """A PDF of n pages, each stamped with its number centred at the bottom."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=size)
+    for i in range(n):
+        c.setFont("Helvetica", 9)
+        c.setFillGray(0.4)
+        c.drawCentredString(size[0] / 2, 22, str(i + 1))
+        c.showPage()
+    c.save()
+    buf.seek(0)
+    return PdfReader(buf)
+
+
 def main() -> None:
     manifest = json.loads(MANIFEST.read_text())
     limit = int(os.environ.get("PDF_LIMIT", "0"))
@@ -122,22 +315,26 @@ def main() -> None:
 
     httpd = start_server()
     port = httpd.server_address[1]
-    printed: list[tuple[Path, str]] = []
     stats = {"mermaid_pages": 0, "mermaid_diagrams": 0, "math_pages": 0}
     t0 = time.time()
 
-    # Local dev defaults to system Google Chrome; CI sets PDF_CHROME_CHANNEL=chromium
-    # to use Playwright's bundled Chromium (installed via `playwright install chromium`).
     channel = os.environ.get("PDF_CHROME_CHANNEL", "chrome").strip().lower()
     launch_kwargs: dict[str, object] = {"headless": True}
     if channel and channel not in ("chromium", "bundled", "none", ""):
         launch_kwargs["channel"] = channel
 
+    # Per-doc-page records + running body page counter give exact TOC page numbers.
+    records: list[dict] = []          # {title, url, page_start, sheets, path}
+    toc_entries: list[tuple[str, str, int]] = []
+    fig_entries: list[tuple[int, str, int]] = []
+    running_page = 1
+    figno = 0
+
     with sync_playwright() as pw:
         browser = pw.chromium.launch(**launch_kwargs)
         page = browser.new_page(viewport={"width": 1280, "height": 900})
         for i, item in enumerate(manifest):
-            url = item["url"]
+            url, title = item["url"], item["title"]
             page.goto(f"http://127.0.0.1:{port}/{url}", wait_until="load", timeout=60000)
 
             math_state = page.evaluate(MATHJAX_JS)
@@ -155,43 +352,120 @@ def main() -> None:
             page.add_style_tag(content=PRINT_CSS)
             if os.environ.get("FIT_WIDE_TABLES") == "1":
                 page.add_style_tag(content=FIT_TABLES_CSS)
-            page.wait_for_timeout(120)  # let layout/fonts settle
 
+            # Figure numbering: derive captions, inject labels, measure positions.
+            kinds = page.evaluate(FIGURE_KINDS_JS)
+            labels, local_figs, di = [], [], 0
+            for f in kinds:
+                figno += 1
+                if f["kind"] == "image":
+                    short = (f["alt"] or "Illustration").strip()
+                else:
+                    short = mermaid_caption(defs[di] if di < len(defs) else "")
+                    di += 1
+                labels.append(f"Figure {figno}. {short}")
+                local_figs.append((figno, f"{title} — {short}"))
+            if labels:
+                page.evaluate(FIGURE_LABEL_JS, labels)
+            fracs = page.evaluate(FIGURE_FRACS_JS) if local_figs else []
+
+            page.wait_for_timeout(120)  # let layout/fonts settle
             out = PAGES_DIR / f"{i:03d}.pdf"
             page.pdf(
-                path=str(out),
-                format="A4",
-                print_background=True,
+                path=str(out), format="A4", print_background=True,
                 margin={"top": "1.5cm", "bottom": "1.5cm", "left": "1.4cm", "right": "1.4cm"},
             )
-            printed.append((out, item["title"]))
+            sheets = len(PdfReader(str(out)).pages)
+            page_start = running_page
+
+            # TOC entry: cover -> top level; section index -> section; else -> sub page.
+            if url == "":
+                toc_entries.append(("cover", "Overview", page_start))
+            elif re.fullmatch(r"section-\d+/", url):
+                toc_entries.append(("section", title, page_start))
+            else:
+                toc_entries.append(("page", title, page_start))
+
+            # Figure entries: page = page_start + fractional position * sheets.
+            for (num, caption), frac in zip(local_figs, fracs):
+                fig_pg = page_start + min(sheets - 1, int(frac * sheets))
+                fig_entries.append((num, caption, fig_pg))
+
+            records.append({"title": title, "url": url, "page_start": page_start, "sheets": sheets})
+            running_page += sheets
             if (i + 1) % 10 == 0 or i == len(manifest) - 1:
                 print(f"  printed {i + 1}/{len(manifest)}")
+
+        body_sheet_total = running_page - 1
+
+        # --- Front matter (themed HTML through the same pipeline) ---
+        head = theme_head()
+        # Date passed in via env to stay deterministic; fall back to a fixed label.
+        date_str = os.environ.get("PDF_DATE", "").strip() or "Generated in CI"
+        title_pdf = render_html_to_pdf(page, port, "__title.html",
+                                       title_html(head, len(records), figno, date_str))
+        toc_pdf = render_html_to_pdf(page, port, "__toc.html", contents_html(head, toc_entries))
+        tof_pdf = render_html_to_pdf(page, port, "__tof.html", figures_html(head, fig_entries))
         browser.close()
 
     httpd.shutdown()
 
-    # Merge into one manual, one bookmark per source page.
+    # --- Assemble: title + contents + figures + numbered body ---
     writer = PdfWriter()
-    for path, title in printed:
-        reader = PdfReader(str(path))
+
+    def add_all(reader: PdfReader) -> int:
         start = len(writer.pages)
         for pg in reader.pages:
             writer.add_page(pg)
-        writer.add_outline_item(title, start)
+        return start
+
+    title_at = add_all(title_pdf)
+    toc_at = add_all(toc_pdf)
+    tof_at = add_all(tof_pdf)
+    body_at = len(writer.pages)
+    for i, rec in enumerate(records):
+        add_all(PdfReader(str(PAGES_DIR / f"{i:03d}.pdf")))
+
+    # Stamp continuous page numbers onto the body sheets (front matter unnumbered).
+    size = (float(writer.pages[body_at].mediabox.width), float(writer.pages[body_at].mediabox.height))
+    overlay = page_number_overlay(body_sheet_total, size)
+    for k in range(body_sheet_total):
+        writer.pages[body_at + k].merge_page(overlay.pages[k])
+
+    # Bookmarks: front matter + a nested section/page tree.
+    writer.add_outline_item("Title page", title_at)
+    writer.add_outline_item("Table of Contents", toc_at)
+    writer.add_outline_item("Table of Figures", tof_at)
+    section_parent = None
+    for rec in records:
+        idx = body_at + rec["page_start"] - 1
+        if rec["url"] == "":
+            writer.add_outline_item(rec["title"], idx)
+        elif re.fullmatch(r"section-\d+/", rec["url"]):
+            section_parent = writer.add_outline_item(rec["title"], idx)
+        else:
+            writer.add_outline_item(rec["title"], idx, parent=section_parent)
+
+    # Merged per-page PDFs repeat identical font/resource objects; de-dup ~-30%.
+    try:
+        writer.compress_identical_objects()
+    except Exception:
+        pass
+
     manual = OUT / "zensical-manual.pdf"
     with open(manual, "wb") as f:
         writer.write(f)
 
     dt = time.time() - t0
-    sheets = len(writer.pages)
-    print("\n=== PDF pipeline complete ===")
-    print(f"time:              {dt:.1f}s ({dt / len(manifest):.2f}s/page)")
-    print(f"doc pages printed: {len(printed)}")
-    print(f"mermaid:           {stats['mermaid_diagrams']} diagrams across {stats['mermaid_pages']} pages")
-    print(f"math typeset:      {stats['math_pages']} pages")
-    print(f"per-page PDFs:     {PAGES_DIR}/ ({len(printed)} files)")
-    print(f"combined manual:   {manual} ({sheets} sheets, {manual.stat().st_size // 1024} KB)")
+    fm = len(title_pdf.pages) + len(toc_pdf.pages) + len(tof_pdf.pages)
+    print("\n=== document assembled ===")
+    print(f"time:            {dt:.1f}s")
+    print(f"doc pages:       {len(records)}   figures: {figno}   math pages: {stats['math_pages']}")
+    print(f"mermaid:         {stats['mermaid_diagrams']} diagrams across {stats['mermaid_pages']} pages")
+    print(f"front matter:    {fm} sheets (title {len(title_pdf.pages)}, "
+          f"contents {len(toc_pdf.pages)}, figures {len(tof_pdf.pages)})")
+    print(f"body:            {body_sheet_total} numbered sheets")
+    print(f"combined manual: {manual} ({len(writer.pages)} sheets, {manual.stat().st_size // 1024} KB)")
 
 
 if __name__ == "__main__":
