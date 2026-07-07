@@ -1,0 +1,7 @@
+.venv/
+site/
+pdfs/
+.cache/
+__pycache__/
+*.pyc
+qa/
