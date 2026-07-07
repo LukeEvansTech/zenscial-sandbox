@@ -1,0 +1,84 @@
+name: Docs + PDF
+
+# Proof-of-concept end-to-end pipeline for a zensical site:
+#   build -> generate PDF (headless Chrome) -> publish to Pages
+#   + upload the PDF as a build artifact and attach it to a "latest" Release,
+#   and expose a "Download PDF" link on the published site.
+#
+# NOTE: actions are tag-pinned for PoC readability. For a production repo,
+# SHA-pin every `uses:` (per the shared-workflows standard).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # create the "latest" Release + upload the PDF asset
+  pages: write # deploy to GitHub Pages
+  id-token: write # OIDC token required by deploy-pages
+
+concurrency:
+  group: docs-pdf-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Playwright's bundled Chromium (make_pdfs.py uses it when
+          # PDF_CHROME_CHANNEL=chromium; locally it defaults to system Chrome).
+          python -m playwright install --with-deps chromium
+
+      - name: Build site (zensical)
+        run: zensical build
+
+      - name: Generate PDFs (per-page + combined manual)
+        env:
+          PDF_CHROME_CHANNEL: chromium
+        run: python make_pdfs.py
+
+      - name: Add manual.pdf into the site (for the Download link)
+        run: cp pdfs/zensical-manual.pdf site/manual.pdf
+
+      - name: Upload PDF build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zensical-manual-pdf
+          path: pdfs/zensical-manual.pdf
+          if-no-files-found: error
+
+      - name: Publish/refresh the "latest" Release with the PDF
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes 2>/dev/null || true
+          gh release create latest pdfs/zensical-manual.pdf \
+            --title "Latest docs PDF" \
+            --notes "Auto-generated from ${{ github.sha }} on $(date -u +%Y-%m-%dT%H:%MZ)."
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
