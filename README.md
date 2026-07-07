@@ -59,5 +59,18 @@ PDF_LIMIT=6       .venv/bin/python make_pdfs.py   # quick smoke on first 6 pages
 | `zensical.toml` | site config (rich extensions, mermaid fence, MathJax) |
 | `docs/` | the committed ~100-page content, assets, MathJax config, `manifest.json` (page order) |
 | `gen_site.py` | regenerates `docs/` (random content — the committed copy is canonical) |
-| `make_pdfs.py` | the build→PDF pipeline (Playwright + pypdf) |
-| `.github/workflows/docs-pdf.yml` | the end-to-end CI pipeline |
+| `make_pdfs.py` | the production build→PDF pipeline: prints each page, merges (Playwright + pypdf + reportlab + Ghostscript) |
+| `make_pdfs_single.py` | **prototype** of the alternative architecture — see below |
+| `.github/workflows/docs-pdf.yml` | the end-to-end CI pipeline (runs `make_pdfs.py`) |
+
+## Prototype: single-document render (`make_pdfs_single.py`)
+
+`make_pdfs.py` prints each page separately and merges them. `make_pdfs_single.py` instead concatenates every page into **one** HTML document and renders it in a **single** Chrome print pass — the architecture the mature tools (mkdocs-with-pdf / WeasyPrint) use. Run it the same way (`PDF_LIMIT=21 python make_pdfs_single.py` → `pdfs/single-manual.pdf`).
+
+What it buys, and what the measurements actually showed:
+
+- ✅ **Exact page numbers** — derived by reading invisible `§H:1.2.3§` markers back out of the rendered text layer, instead of estimating from a heading's fractional position (the per-page approach is ±1 sheet).
+- ✅ **Working cross-page links** — every doc-page becomes an in-PDF anchor, so the "In this section" lists and cross-references jump within the PDF (the per-page merge has none).
+- ✅ **Faster** — one print pass (~7 s vs ~13 s at 21 pages).
+- ❌ **Does *not* dodge the font bloat.** I assumed one render would embed fonts once (as WeasyPrint does); measured, **Chrome re-embeds a subset per output page even in one job**, so the raw file is still ~4 MB. Ghostscript would crush it but it **strips the internal links** — so we compress with **pikepdf** instead (object streams + flate), which keeps every link and lands at ~0.95 MB.
+- ⚠️ **Cost of the merge:** each zensical page is standalone with relative asset paths, so we absolutize URLs, namespace per-page ids (so footnotes don't collide), and let MathJax typeset the *whole* combined document at once (CHTML builds its glyph stylesheet incrementally, so per-page math can't be extracted cleanly). One big render is also more memory-hungry than per-page.
