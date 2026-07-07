@@ -20,6 +20,8 @@ On every push to `main`:
    - a **numbered, multi-level TOC** (`TOC_DEPTH=3` also lists every `h2`) — from its `make_indexes`;
    - a **running chapter name** in the top corner + a **`page / total` footer** (stamped with reportlab) — from its `_paging.scss` `@page` margin boxes;
    - **page-break hygiene** so headings stay with their content and figures / code / admonitions don't split across a page — from its `_paging.scss` `@media print` rules.
+
+   Finally it **compresses the merged PDF with Ghostscript** (`/prepress`). Chrome embeds a font subset on every page, so a 370-sheet merge is ~20 MB of duplicated fonts; Ghostscript rebuilds one shared subset and re-packs the streams for a **~6× smaller file (~20 MB → ~3 MB)** with no visible quality loss — text stays vector, and mermaid/math SVG + the PDF outline are preserved. It's a no-op if `gs` isn't installed (skip with `PDF_NO_GS=1`).
 3. **Publish** `site/` to GitHub Pages, with the merged PDF copied in as `/manual.pdf` so the site's home page has a working **Download PDF** button.
 4. **Deliver the PDF** three ways: as a **build artifact**, and attached to a **"latest" Release**.
 
