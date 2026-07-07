@@ -13,7 +13,7 @@ Zensical (as of 0.0.47) has **no native PDF export** and supports **zero plugins
 On every push to `main`:
 
 1. **Build** the site with `zensical build` → `site/`.
-2. **Generate PDFs** with `make_pdfs.py`: serves `site/`, drives headless Chromium (Playwright) to print each page, and merges them into one manual with a bookmark per page → `pdfs/zensical-manual.pdf` (+ per-page PDFs in `pdfs/pages/`).
+2. **Generate the document** with `make_pdfs.py`: serves `site/`, drives headless Chromium (Playwright) to print each page, then assembles a real document — **title page → table of contents (exact page numbers) → table of figures (numbered figures) → page-numbered body** — with a nested PDF outline → `pdfs/zensical-manual.pdf` (+ per-page PDFs in `pdfs/pages/`). Front matter is rendered as themed HTML through the same pipeline; page numbers are stamped with reportlab; TOC/figure page numbers are computed exactly from per-page sheet counts.
 3. **Publish** `site/` to GitHub Pages, with the merged PDF copied in as `/manual.pdf` so the site's home page has a working **Download PDF** button.
 4. **Deliver the PDF** three ways: as a **build artifact**, and attached to a **"latest" Release**.
 

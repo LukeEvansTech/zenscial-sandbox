@@ -43,10 +43,10 @@ jobs:
       - name: Build site (zensical)
         run: zensical build
 
-      - name: Generate PDFs (per-page + combined manual)
+      - name: Generate the document (title + TOC + figures + numbered body)
         env:
           PDF_CHROME_CHANNEL: chromium
-        run: python make_pdfs.py
+        run: PDF_DATE="$(date -u '+%-d %B %Y')" python make_pdfs.py
 
       - name: Add manual.pdf into the site (for the Download link)
         run: cp pdfs/zensical-manual.pdf site/manual.pdf
