@@ -13,7 +13,13 @@ Zensical (as of 0.0.47) has **no native PDF export** and supports **zero plugins
 On every push to `main`:
 
 1. **Build** the site with `zensical build` → `site/`.
-2. **Generate the document** with `make_pdfs.py`: serves `site/`, drives headless Chromium (Playwright) to print each page, then assembles a real document — **title page → table of contents (exact page numbers) → table of figures (numbered figures) → page-numbered body** — with a nested PDF outline → `pdfs/zensical-manual.pdf` (+ per-page PDFs in `pdfs/pages/`). Front matter is rendered as themed HTML through the same pipeline; page numbers are stamped with reportlab; TOC/figure page numbers are computed exactly from per-page sheet counts.
+2. **Generate the document** with `make_pdfs.py`: serves `site/`, drives headless Chromium (Playwright) to print each page, then assembles a real document — **title page → numbered table of contents → table of figures → body** — with a nested PDF outline → `pdfs/zensical-manual.pdf` (+ per-page PDFs in `pdfs/pages/`). Front matter is rendered as themed HTML through the same pipeline; TOC/figure page numbers are computed exactly from per-page sheet counts.
+
+   Several **document conventions are ported from the maintained [`mkdocs-to-pdf`](https://github.com/domWalters/mkdocs-to-pdf) plugin** (a WeasyPrint-based fork of `mkdocs-with-pdf`), re-implemented for our headless-Chrome + `pypdf` pipeline since those plugins can't run under zensical:
+   - **hierarchical heading numbers** (`1`, `1.1`, `1.1.1`) injected into the body and the TOC — from its `_inject_heading_order`;
+   - a **numbered, multi-level TOC** (`TOC_DEPTH=3` also lists every `h2`) — from its `make_indexes`;
+   - a **running chapter name** in the top corner + a **`page / total` footer** (stamped with reportlab) — from its `_paging.scss` `@page` margin boxes;
+   - **page-break hygiene** so headings stay with their content and figures / code / admonitions don't split across a page — from its `_paging.scss` `@media print` rules.
 3. **Publish** `site/` to GitHub Pages, with the merged PDF copied in as `/manual.pdf` so the site's home page has a working **Download PDF** button.
 4. **Deliver the PDF** three ways: as a **build artifact**, and attached to a **"latest" Release**.
 
