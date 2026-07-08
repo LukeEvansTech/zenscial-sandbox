@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""PROTOTYPE — single-document render of the zensical site to one PDF.
+"""PRODUCTION — single-document render of the zensical site to one PDF.
 
 Where make_pdfs.py prints each page separately and *merges* them (which duplicates
 the font subset on every sheet — hence the ~20 MB bloat and the Ghostscript pass —
@@ -16,9 +16,12 @@ raw — it does NOT dodge the bloat the way WeasyPrint would. Ghostscript would 
 it, but it strips the internal GoTo links (the whole point here), so we compress
 with pikepdf instead: <1 MB with every cross-page link intact.
 
-This is the architecture the mature tools (mkdocs-with-pdf / WeasyPrint) use. It is
-a PROTOTYPE: a full 370-sheet single render is heavier on memory, so iterate behind
-PDF_LIMIT. The production make_pdfs.py is left untouched for side-by-side diffing.
+This is the architecture the mature tools (mkdocs-with-pdf / WeasyPrint) use.
+Promoted to production 2026-07-08 after full-scale validation (372 sheets, 2.82 MB,
+~28s, 238 working cross-page links). Trade-off vs the per-page pipeline: one big
+render peaks at ~3.7 GB RAM (fine on a 7 GB CI runner) and loses per-page failure
+isolation. The per-page make_pdfs.py is kept as the reference implementation;
+iterate locally behind PDF_LIMIT.
 
 How the merge works: each built zensical page is a standalone HTML doc with asset
 paths relative to *its own* directory, so we (a) let the browser absolutize every
@@ -26,8 +29,11 @@ src/href (reading el.src/el.href), (b) namespace ids per page so footnotes don't
 collide, (c) rewrite links that point at other doc pages into intra-PDF #anchors,
 then concatenate the article bodies under one shared <head>.
 
-Output: pdfs/single-manual.pdf
-Env: same as make_pdfs.py (PDF_CHROME_CHANNEL, FIT_WIDE_TABLES, PDF_LIMIT, PDF_DATE).
+Output: pdfs/zensical-manual.pdf
+Env: same as make_pdfs.py (PDF_CHROME_CHANNEL, FIT_WIDE_TABLES, PDF_LIMIT, PDF_DATE),
+plus PDF_SITE_URL — the published site's base URL; links that leave the document
+(e.g. the cover's "Download PDF" button) are rewritten to it so they don't ship as
+dead http://127.0.0.1:<port>/ URIs from the local render server.
 """
 from __future__ import annotations
 
@@ -101,10 +107,12 @@ NUMBER_AND_MARK_JS = r"""({base, h1Only}) => {
 
 # Prepare a page for concatenation: absolutize asset URLs (so they still resolve
 # from the combined doc's location), namespace every id + intra-page #href with a
-# per-page prefix (so duplicate footnote ids don't collide), then hand back the
-# article's outerHTML.
+# per-page prefix (so duplicate footnote ids don't collide), expand collapsible
+# ("???") admonitions — print can't click, so collapsed content would be lost —
+# then hand back the article's outerHTML.
 REWRITE_JS = r"""(i) => {
     const abs = u => { try { return new URL(u, location.href).href; } catch (e) { return u; } };
+    document.querySelectorAll('details').forEach(e => e.setAttribute('open', ''));
     document.querySelectorAll('img[src]').forEach(e => e.setAttribute('src', abs(e.getAttribute('src'))));
     document.querySelectorAll('[id]').forEach(e => { e.id = 'p' + i + '-' + e.id; });
     document.querySelectorAll('a[href]').forEach(e => {
@@ -217,15 +225,28 @@ def main() -> None:
                 print(f"  prepped {i + 1}/{len(manifest)}")
 
         # Rewrite links that point at another doc page into intra-PDF #anchors.
+        # Anything still pointing at the local render server afterwards (e.g. the
+        # cover's "Download PDF" button) leaves the document, so retarget it at the
+        # published site — otherwise it ships as a dead http://127.0.0.1/ URI.
+        # Only hrefs: img src must keep resolving locally for the combined render.
+        site_url = os.environ.get("PDF_SITE_URL", "").strip()
+        if site_url and not site_url.endswith("/"):
+            site_url += "/"
         url_to_anchor = {f'"{base}{it["url"]}"': f'"#pg-{j}"' for j, it in enumerate(manifest)}
 
         def relink(frag: str) -> str:
             for src, dst in url_to_anchor.items():
                 frag = frag.replace(src, dst)
+            if site_url:
+                frag = frag.replace(f'href="{base}', f'href="{site_url}')
             return frag
 
         articles = "".join(f'<article id="pg-{i}" class="pp">{relink(f)}</article>'
                            for i, f in enumerate(fragments))
+        leftover = articles.count(f'href="{base}')
+        if leftover and not site_url:
+            print(f"  WARNING: {leftover} link(s) still point at the local render server "
+                  "and will be dead in the PDF — set PDF_SITE_URL to retarget them")
         head = M.theme_head() + f"<style>{M.PRINT_CSS}{EXTRA_CSS}</style>"
         if os.environ.get("FIT_WIDE_TABLES") == "1":
             head += f"<style>{M.FIT_TABLES_CSS}</style>"
@@ -236,26 +257,32 @@ def main() -> None:
         body_doc = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
                     f'{head}</head><body class="md-typeset">{articles}{mathjax}</body></html>')
 
-        # Single print pass over the whole document.
+        # Single print pass over the whole document. try/finally so a failed render
+        # can't leave the temp doc behind inside site/ (which publishes to Pages).
         tmp = M.SITE / "__single_body.html"
         tmp.write_text(body_doc)
-        print("  rendering combined document (single print pass)…")
-        page.goto(base + "__single_body.html", wait_until="load", timeout=180000)
-        page.wait_for_function("() => window.MathJax", timeout=30000)
-        page.evaluate(M.MATHJAX_JS)  # await typesetting of every equation
-        page.wait_for_timeout(400)
-        body_bytes = page.pdf(format="A4", print_background=True, margin=A4_MARGIN)
-        tmp.unlink(missing_ok=True)
+        try:
+            print("  rendering combined document (single print pass)…")
+            page.goto(base + "__single_body.html", wait_until="load", timeout=180000)
+            page.wait_for_function("() => window.MathJax", timeout=30000)
+            page.evaluate(M.MATHJAX_JS)  # await typesetting of every equation
+            page.wait_for_timeout(400)
+            body_bytes = page.pdf(format="A4", print_background=True, margin=A4_MARGIN)
+        finally:
+            tmp.unlink(missing_ok=True)
 
         # Exact page numbers: find each marker / figure caption in the rendered text.
         body_reader = PdfReader(io.BytesIO(body_bytes))
         page_texts = [(pg.extract_text() or "") for pg in body_reader.pages]
         total = len(page_texts)
 
+        misses: list[str] = []
+
         def find_page(token: str) -> int:
             for n, txt in enumerate(page_texts):
                 if token in txt:
                     return n + 1
+            misses.append(token)  # fall back to 1, but say so — silent = wrong TOC
             return 1
 
         head_page = {r["number"]: find_page(f"§H:{r['number']}§")
@@ -263,6 +290,9 @@ def main() -> None:
         toc_entries = [(kind, number, title, (1 if kind == "cover" else head_page.get(number, 1)))
                        for (kind, number, title) in toc_pre]
         fig_entries = [(n, cap, find_page(f"Figure {n}.")) for (n, cap) in fig_pre]
+        if misses:
+            print(f"  WARNING: {len(misses)} marker(s) not found in the rendered text "
+                  f"layer (TOC entries default to page 1): {misses[:8]}")
 
         # Front matter (rendered through the same themed pipeline as make_pdfs).
         head_fm = M.theme_head()
@@ -319,7 +349,7 @@ def main() -> None:
         else:
             writer.add_outline_item(label, idx, parent=section_parent)
 
-    out = M.OUT / "single-manual.pdf"
+    out = M.OUT / "zensical-manual.pdf"  # production name — CI's downstream steps expect it
     with open(out, "wb") as f:
         writer.write(f)
     raw, final = compress_with_pikepdf(out)
