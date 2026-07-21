@@ -74,7 +74,7 @@ jobs:
             --notes "Auto-generated from ${{ github.sha }} on $(date -u +%Y-%m-%dT%H:%MZ)."
 
       - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
         with:
           path: site
 
