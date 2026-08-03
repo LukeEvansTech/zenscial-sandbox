@@ -2,6 +2,8 @@
 
 Topology cache namespace architecture provision propagate orchestrate publish. Deterministic downstream heuristic digest baseline backoff render document throughput converge document manifest? Document idempotent architecture manifest contract publish renovate downstream. Checksum checksum config validate heuristic observability drift namespace cache converge latency digest architecture? Serialize throttle rollout module downstream token throttle validate coverage publish canonical schema artifact permission observability deterministic document threshold;
 
+<p><a class="md-button md-button--primary" href="../volumes/vol10.pdf" download>⬇ Download this volume as a PDF (vol10.pdf)</a></p>
+
 ## In this section
 
 - [Appendix — Topic 1](page-01.md)

@@ -1,9 +1,11 @@
 name: Docs + PDF
 
 # Proof-of-concept end-to-end pipeline for a zensical site:
-#   build -> generate PDF (headless Chrome) -> publish to Pages
-#   + upload the PDF as a build artifact and attach it to a "latest" Release,
-#   and expose a "Download PDF" link on the published site.
+#   build -> generate PDFs (headless Chrome) -> publish to Pages
+#   Two renders of the same site: the whole site as ONE manual
+#   (make_pdfs_single.py) and one standalone volume document per section
+#   (make_pdfs_volumes.py). All PDFs are uploaded as build artifacts, attached
+#   to a "latest" Release, and exposed as Download links on the published site.
 #
 # NOTE: actions are tag-pinned for PoC readability. For a production repo,
 # SHA-pin every `uses:` (per the shared-workflows standard).
@@ -54,8 +56,22 @@ jobs:
           PDF_SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
         run: PDF_DATE="$(date -u '+%-d %B %Y')" python make_pdfs_single.py
 
-      - name: Add manual.pdf into the site (for the Download link)
-        run: cp pdfs/zensical-manual.pdf site/manual.pdf
+      # Per-volume render (make_pdfs_volumes.py): the same single-render recipe
+      # scoped to one section per document -> vol1.pdf .. volN.pdf. Each volume
+      # is standalone (own title page / TOC / figures / outline, numbering
+      # restarts at 1); links that leave a volume are retargeted at the
+      # published site. Additive next to the single manual, not a replacement.
+      - name: Generate the volume documents (one standalone PDF per section)
+        env:
+          PDF_CHROME_CHANNEL: chromium
+          PDF_SITE_URL: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/
+        run: PDF_DATE="$(date -u '+%-d %B %Y')" python make_pdfs_volumes.py
+
+      - name: Add manual.pdf + volume PDFs into the site (for the Download links)
+        run: |
+          cp pdfs/zensical-manual.pdf site/manual.pdf
+          mkdir -p site/volumes
+          cp pdfs/vol*.pdf site/volumes/
 
       - name: Upload PDF build artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -64,14 +80,21 @@ jobs:
           path: pdfs/zensical-manual.pdf
           if-no-files-found: error
 
-      - name: Publish/refresh the "latest" Release with the PDF
+      - name: Upload volume PDFs build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zensical-volume-pdfs
+          path: pdfs/vol*.pdf
+          if-no-files-found: error
+
+      - name: Publish/refresh the "latest" Release with the PDFs
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release delete latest --cleanup-tag --yes 2>/dev/null || true
-          gh release create latest pdfs/zensical-manual.pdf \
-            --title "Latest docs PDF" \
-            --notes "Auto-generated from ${{ github.sha }} on $(date -u +%Y-%m-%dT%H:%MZ)."
+          gh release create latest pdfs/zensical-manual.pdf pdfs/vol*.pdf \
+            --title "Latest docs PDFs" \
+            --notes "Auto-generated from ${{ github.sha }} on $(date -u +%Y-%m-%dT%H:%MZ). zensical-manual.pdf is the whole site as one document; vol1..volN are one standalone document per section."
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

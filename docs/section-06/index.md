@@ -2,6 +2,8 @@
 
 Drift boundary baseline digest invariant deploy module permission token telemetry reconcile provision. Boundary canonical fixture permission invariant artifact annotate token architecture topology heuristic topology upstream artifact pipeline config contract provision assertion checksum; Canonical config immutable downstream downstream throughput throttle artifact document renovate orchestrate latency reconcile contract document immutable workflow; Contract observability config architecture artifact entropy invariant migrate permission boundary validate scope ephemeral permission heuristic heuristic config renovate module?
 
+<p><a class="md-button md-button--primary" href="../volumes/vol6.pdf" download>⬇ Download this volume as a PDF (vol6.pdf)</a></p>
+
 ## In this section
 
 - [Markdown Extensions — Topic 1](page-01.md)
