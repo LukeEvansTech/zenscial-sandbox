@@ -503,5 +503,105 @@
     "url": "section-10/page-09/",
     "title": "Appendix \u2014 Topic 9",
     "md": "section-10/page-09.md"
+  },
+  {
+    "url": "section-11/",
+    "title": "Access Platform Design",
+    "md": "section-11/index.md"
+  },
+  {
+    "url": "section-11/document-control/",
+    "title": "Access Platform Design \u2014 Document Control",
+    "md": "section-11/document-control.md"
+  },
+  {
+    "url": "section-11/page-01/",
+    "title": "Access Platform Design \u2014 Service Overview",
+    "md": "section-11/page-01.md"
+  },
+  {
+    "url": "section-11/page-02/",
+    "title": "Access Platform Design \u2014 Network Topology",
+    "md": "section-11/page-02.md"
+  },
+  {
+    "url": "section-11/page-03/",
+    "title": "Access Platform Design \u2014 Identity Integration",
+    "md": "section-11/page-03.md"
+  },
+  {
+    "url": "section-11/page-04/",
+    "title": "Access Platform Design \u2014 Storage & Data Layout",
+    "md": "section-11/page-04.md"
+  },
+  {
+    "url": "section-11/page-05/",
+    "title": "Access Platform Design \u2014 Resilience & Recovery",
+    "md": "section-11/page-05.md"
+  },
+  {
+    "url": "section-11/page-06/",
+    "title": "Access Platform Design \u2014 Monitoring & Alerting",
+    "md": "section-11/page-06.md"
+  },
+  {
+    "url": "section-11/page-07/",
+    "title": "Access Platform Design \u2014 Security Controls",
+    "md": "section-11/page-07.md"
+  },
+  {
+    "url": "section-11/glossary/",
+    "title": "Access Platform Design \u2014 Glossary",
+    "md": "section-11/glossary.md"
+  },
+  {
+    "url": "section-12/",
+    "title": "Managed Desktop Design",
+    "md": "section-12/index.md"
+  },
+  {
+    "url": "section-12/document-control/",
+    "title": "Managed Desktop Design \u2014 Document Control",
+    "md": "section-12/document-control.md"
+  },
+  {
+    "url": "section-12/page-01/",
+    "title": "Managed Desktop Design \u2014 Service Overview",
+    "md": "section-12/page-01.md"
+  },
+  {
+    "url": "section-12/page-02/",
+    "title": "Managed Desktop Design \u2014 Network Topology",
+    "md": "section-12/page-02.md"
+  },
+  {
+    "url": "section-12/page-03/",
+    "title": "Managed Desktop Design \u2014 Identity Integration",
+    "md": "section-12/page-03.md"
+  },
+  {
+    "url": "section-12/page-04/",
+    "title": "Managed Desktop Design \u2014 Storage & Data Layout",
+    "md": "section-12/page-04.md"
+  },
+  {
+    "url": "section-12/page-05/",
+    "title": "Managed Desktop Design \u2014 Resilience & Recovery",
+    "md": "section-12/page-05.md"
+  },
+  {
+    "url": "section-12/page-06/",
+    "title": "Managed Desktop Design \u2014 Monitoring & Alerting",
+    "md": "section-12/page-06.md"
+  },
+  {
+    "url": "section-12/page-07/",
+    "title": "Managed Desktop Design \u2014 Security Controls",
+    "md": "section-12/page-07.md"
+  },
+  {
+    "url": "section-12/glossary/",
+    "title": "Managed Desktop Design \u2014 Glossary",
+    "md": "section-12/glossary.md"
   }
 ]

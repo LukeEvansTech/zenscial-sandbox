@@ -2,6 +2,8 @@
 
 Serialize scope coverage cache heuristic scope render pipeline heuristic artifact scope observability schema; Interface backoff threshold contract reconcile scope checksum deterministic architecture; Document publish palette topology converge idempotent downstream throttle registry contract canonical orchestrate workflow heuristic contract namespace topology render. Provision pipeline lint schema publish serialize annotate render palette deterministic provision renovate propagate throttle rollout architecture contract immutable?
 
+<p><a class="md-button md-button--primary" href="../volumes/vol5.pdf" download>⬇ Download this volume as a PDF (vol5.pdf)</a></p>
+
 ## In this section
 
 - [Theming & Palette — Topic 1](page-01.md)

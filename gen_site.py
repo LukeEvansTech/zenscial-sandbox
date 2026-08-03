@@ -16,6 +16,12 @@ Every page cycles through content "archetypes" so the PDF renderer is
 exercised on tables, code blocks, admonitions, mermaid diagrams, images,
 math, tabs, lists, footnotes and long multi-page prose.
 
+Sections 11+ are "volume-shaped": they carry the authored document furniture
+of a classic controlled document volume (document control page, per-topic
+design-decision registers, per-volume glossary) so the per-volume PDF pipeline
+(make_pdfs_volumes.py) can be compared against plain sections. Generation is
+fully seeded — regenerating reproduces the committed content byte-for-byte.
+
 Writes docs/manifest.json describing page order + output URLs so the PDF
 pipeline knows exactly what to print and in what order.
 """
@@ -30,9 +36,15 @@ ROOT = Path(__file__).resolve().parent
 DOCS = ROOT / "docs"
 ASSETS = DOCS / "assets"
 
-SECTIONS = 10          # number of sections
-PAGES_PER_SECTION = 9  # topic pages per section (+1 section index each)
-# total pages = 1 cover + SECTIONS * (1 index + PAGES_PER_SECTION)
+SECTIONS = 10          # number of plain sections
+PAGES_PER_SECTION = 9  # topic pages per section (+1 index each)
+# Volume-shaped sections (11..) mimic the shape of a classic controlled document
+# volume — document control page, design-decision tables, per-volume glossary —
+# so the per-volume PDF pipeline can be compared against the plain sections.
+# Their document furniture is authored *content*; the PDF pipeline stays generic.
+VOLUME_SECTIONS = 2
+VOLUME_TOPICS = 7      # + document-control + glossary = 9 content pages, like plain
+# total pages = 1 cover + (SECTIONS + VOLUME_SECTIONS) * (1 index + 9)
 
 WORDS = (
     "system architecture pipeline module interface latency throughput cache "
@@ -56,6 +68,21 @@ SECTION_TITLES = [
     "Automation & CI",
     "Troubleshooting",
     "Appendix",
+]
+
+VOLUME_SECTION_TITLES = [
+    "Access Platform Design",
+    "Managed Desktop Design",
+]
+
+VOLUME_TOPIC_TITLES = [
+    "Service Overview",
+    "Network Topology",
+    "Identity Integration",
+    "Storage & Data Layout",
+    "Resilience & Recovery",
+    "Monitoring & Alerting",
+    "Security Controls",
 ]
 
 
@@ -300,6 +327,80 @@ def build_page(seed: int, title: str, prefix: str, long_page: bool) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Volume-shaped sections: authored document furniture (document control,
+# design-decision tables, glossary) mimicking a classic controlled document
+# volume, so the per-volume PDF output can be judged against the real shape.
+# All names, dates, classifications and decisions are fabricated fixtures.
+# ---------------------------------------------------------------------------
+def volume_button(n: int) -> str:
+    return (f'<p><a class="md-button md-button--primary" href="../volumes/vol{n}.pdf" download>'
+            f"⬇ Download this volume as a PDF (vol{n}.pdf)</a></p>")
+
+
+def block_design_decisions(r: random.Random, vol: int, topic: int) -> str:
+    rows = []
+    for d in range(1, r.randint(4, 7)):
+        status = r.choice(["✅ agreed", "⚠️ provisional", "🔒 mandated"])
+        rows.append(f"| DD-{vol}{topic:02d}{d:02d} | {sentence(r, 9)} | {sentence(r)} | {status} |")
+    return ("\n## Design decisions\n\n"
+            "The decisions below are fabricated fixture rows shaped like a "
+            "controlled design document's decision register.\n\n"
+            "| Ref | Decision | Rationale | Status |\n"
+            "| --- | --- | --- | --- |\n" + "\n".join(rows) + "\n")
+
+
+def document_control_page(stitle: str, vol: int) -> str:
+    return f"""# {stitle} — Document Control
+
+!!! info "Synthetic fixture"
+    This page mimics the document-control furniture of a classic controlled
+    document set (classification, circulation, approval, version history).
+    Every name, date and classification below is fabricated.
+
+## Classification
+
+| Item | Value |
+| --- | --- |
+| Security classification | MOCK-INTERNAL (synthetic fixture) |
+| Disclosable | Yes — generated test content |
+| Document set | Zensical PDF Stress Test, Volume {vol} |
+
+## Circulation
+
+| Name / Role | Organisation |
+| --- | --- |
+| Fixture Design Authority | Zensical Sandbox |
+| Fixture Cyber Authority | Zensical Sandbox |
+| Anyone reading the sandbox repo | Public |
+
+## Approval
+
+| Name / Role | Organisation |
+| --- | --- |
+| Sandbox Design Authority | Zensical Sandbox |
+
+Approval will be granted based upon the satisfactory resolution of review
+feedback from the fixture authorities named above.
+
+## Version history
+
+| Version | Author | Date | Summary of changes |
+| --- | --- | --- | --- |
+| 1.0.0 | Fixture Generator | 12 May 2026 | Initial release of the volume fixture. |
+| 1.1.0 | Fixture Generator | 7 June 2026 | Added design-decision registers to every topic. |
+| 1.2.0 | Fixture Generator | 3 August 2026 | Added per-volume glossary and document control. |
+"""
+
+
+def glossary_page(r: random.Random, stitle: str) -> str:
+    terms = sorted(r.sample(WORDS, 14))
+    rows = "\n".join(f"| `{t}` | {sentence(r)} |" for t in terms)
+    return (f"# {stitle} — Glossary\n\n"
+            "Terms used throughout this volume. Synthetic fixture content.\n\n"
+            "| Term | Definition |\n| --- | --- |\n" + rows + "\n")
+
+
+# ---------------------------------------------------------------------------
 # SVG assets (text -> crisp vector in the PDF)
 # ---------------------------------------------------------------------------
 def write_assets():
@@ -438,25 +539,35 @@ def main():
     cover = ["# Zensical PDF Stress Test\n",
              "A synthetic documentation site with **~100 pages** of representative "
              "content, generated to test HTML→PDF conversion of a zensical build.\n",
+             '<p><a class="md-button md-button--primary" href="manual.pdf" download>'
+             "⬇ Download this whole site as a PDF</a></p>\n",
+             "*(The PDF is generated in CI by printing this built site with headless "
+             "Chrome and merging every page — see the `Docs + PDF` workflow. Each "
+             "section is also rendered as a standalone volume document — see the "
+             "download button on every section index.)*\n",
              block_image(r, ""),
              "\n## What this exercises\n",
              "- Wide tables, fenced code (5 languages), admonitions & collapsibles\n"
              "- Mermaid diagrams (flowchart, sequence, class, state, pie)\n"
              "- Inline SVG images, math (arithmatex), content tabs, task/def lists\n"
-             "- Long pages that span multiple printed sheets\n",
+             "- Long pages that span multiple printed sheets\n"
+             "- Volume-shaped sections (11+) with authored document-control, "
+             "design-decision and glossary pages\n",
              "\n## Sections\n"]
-    for s in range(1, SECTIONS + 1):
-        cover.append(f"{s}. [{SECTION_TITLES[s - 1]}](section-{s:02d}/index.md)")
+    all_titles = SECTION_TITLES + VOLUME_SECTION_TITLES
+    for s in range(1, SECTIONS + VOLUME_SECTIONS + 1):
+        cover.append(f"{s}. [{all_titles[s - 1]}](section-{s:02d}/index.md)")
     (DOCS / "index.md").write_text("\n".join(cover) + "\n")
     manifest.append({"url": "", "title": "Zensical PDF Stress Test", "md": "index.md"})
 
-    # --- Sections ---
+    # --- Plain sections ---
     for s in range(1, SECTIONS + 1):
         sdir = DOCS / f"section-{s:02d}"
         sdir.mkdir()
         stitle = SECTION_TITLES[s - 1]
         idx = [f"# {stitle}\n",
                paragraph(rng(s * 1000)),
+               "\n" + volume_button(s),
                "\n## In this section\n"]
         for p in range(1, PAGES_PER_SECTION + 1):
             idx.append(f"- [{stitle} — Topic {p}](page-{p:02d}.md)")
@@ -474,9 +585,55 @@ def main():
                              "title": title,
                              "md": f"section-{s:02d}/page-{p:02d}.md"})
 
+    # --- Volume-shaped sections (authored document furniture) ---
+    for s in range(SECTIONS + 1, SECTIONS + VOLUME_SECTIONS + 1):
+        sdir = DOCS / f"section-{s:02d}"
+        sdir.mkdir()
+        stitle = VOLUME_SECTION_TITLES[s - SECTIONS - 1]
+        idx = [f"# {stitle}\n",
+               paragraph(rng(s * 1000)),
+               "\n" + volume_button(s),
+               '\n!!! info "Volume-shaped fixture"\n'
+               "    This section mimics the shape of a classic controlled document "
+               "volume —\n"
+               "    document control, design-decision registers and a glossary are "
+               "authored\n"
+               "    pages, not pipeline output. All content is synthetic.",
+               "\n## In this volume\n",
+               "- [Document Control](document-control.md)"]
+        for p in range(1, VOLUME_TOPICS + 1):
+            idx.append(f"- [{stitle} — {VOLUME_TOPIC_TITLES[p - 1]}](page-{p:02d}.md)")
+        idx.append("- [Glossary](glossary.md)")
+        (sdir / "index.md").write_text("\n".join(idx) + "\n")
+        manifest.append({"url": f"section-{s:02d}/", "title": stitle,
+                         "md": f"section-{s:02d}/index.md"})
+
+        (sdir / "document-control.md").write_text(document_control_page(stitle, s))
+        manifest.append({"url": f"section-{s:02d}/document-control/",
+                         "title": f"{stitle} — Document Control",
+                         "md": f"section-{s:02d}/document-control.md"})
+
+        for p in range(1, VOLUME_TOPICS + 1):
+            seed = s * 1000 + p
+            long_page = (s + p) % 4 == 0
+            title = f"{stitle} — {VOLUME_TOPIC_TITLES[p - 1]}"
+            content = build_page(seed, title, prefix="../", long_page=long_page)
+            content += block_design_decisions(rng(s * 1000 + 100 + p), s, p)
+            (sdir / f"page-{p:02d}.md").write_text(content)
+            manifest.append({"url": f"section-{s:02d}/page-{p:02d}/",
+                             "title": title,
+                             "md": f"section-{s:02d}/page-{p:02d}.md"})
+
+        (sdir / "glossary.md").write_text(glossary_page(rng(s * 1000 + 998), stitle))
+        manifest.append({"url": f"section-{s:02d}/glossary/",
+                         "title": f"{stitle} — Glossary",
+                         "md": f"section-{s:02d}/glossary.md"})
+
     (DOCS / "manifest.json").write_text(json.dumps(manifest, indent=2))
     print(f"Generated {len(manifest)} pages "
-          f"({SECTIONS} sections x {PAGES_PER_SECTION} + {SECTIONS} indexes + 1 cover).")
+          f"({SECTIONS} plain sections x {PAGES_PER_SECTION} + "
+          f"{VOLUME_SECTIONS} volume-shaped sections x {VOLUME_TOPICS + 2} + "
+          f"{SECTIONS + VOLUME_SECTIONS} indexes + 1 cover).")
     print(f"docs dir: {DOCS}")
 
 
