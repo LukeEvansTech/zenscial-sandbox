@@ -4,6 +4,8 @@ A reusable **sandbox** for experimenting with [zensical](https://zensical.org) �
 
 **First experiment (live now): zensical → PDF, end to end.** A ~100-page synthetic docs site that CI builds, publishes to GitHub Pages, and turns into a single PDF — proving whether a zensical site can be delivered as a PDF, and how.
 
+**Second experiment (live now): the same site as a document *set*.** Alongside the single manual, `make_pdfs_volumes.py` renders each top-level section as its **own standalone volume document** (`vol1.pdf` … `volN.pdf`) — the reverse trip of a document transformation that split a set of per-volume PDFs into markdown. See "The per-volume render" below.
+
 ## Why this exists
 
 Zensical (as of 0.0.47) has **no native PDF export** and supports **zero plugins yet** — the plugin/module system is still being built, and `mkdocs-with-pdf` support is only a backlog request. So a PDF has to be produced as a **post-build step**: print the built HTML with headless Chrome and merge the pages. This repo proves that works, including the awkward bits (mermaid, math, wide tables).
@@ -20,8 +22,9 @@ On every push to `main`:
    - a **numbered, multi-level TOC** (`TOC_DEPTH=3` also lists every `h2`) — from its `make_indexes`;
    - a **running chapter name** in the top corner + a **`page / total` footer** (stamped with reportlab) — from its `_paging.scss` `@page` margin boxes;
    - **page-break hygiene** so headings stay with their content and figures / code / admonitions don't split across a page — from its `_paging.scss` `@media print` rules.
-3. **Publish** `site/` to GitHub Pages, with the merged PDF copied in as `/manual.pdf` so the site's home page has a working **Download PDF** button.
-4. **Deliver the PDF** three ways: as a **build artifact**, and attached to a **"latest" Release**.
+3. **Generate the volume documents** with `make_pdfs_volumes.py`: the same single-render recipe run once per section → `vol1.pdf` … `volN.pdf`.
+4. **Publish** `site/` to GitHub Pages, with the merged PDF copied in as `/manual.pdf` (the home page's **Download PDF** button) and the volumes under `/volumes/` (a **Download this volume** button on every section index).
+5. **Deliver the PDFs** as **build artifacts** and attached to a **"latest" Release** (manual + all volumes).
 
 ## What renders in the PDF, and the caveats
 
@@ -41,14 +44,16 @@ uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
 .venv/bin/python -m playwright install chromium   # or rely on system Chrome
 
-.venv/bin/python gen_site.py            # (re)generate the ~100-page site (random content)
+.venv/bin/python gen_site.py            # (re)generate the site (seeded — reproduces the committed content)
 .venv/bin/zensical build                # -> site/
 .venv/bin/python make_pdfs_single.py    # -> pdfs/zensical-manual.pdf (uses system Chrome locally)
+.venv/bin/python make_pdfs_volumes.py   # -> pdfs/vol1.pdf .. volN.pdf (one document per section)
 
 # variants
 PDF_SITE_URL=https://…/  .venv/bin/python make_pdfs_single.py  # retarget outbound links (CI sets this)
 FIT_WIDE_TABLES=1        .venv/bin/python make_pdfs_single.py  # fit wide tables
 PDF_LIMIT=6              .venv/bin/python make_pdfs_single.py  # quick smoke on first 6 pages
+PDF_VOLUME=11            .venv/bin/python make_pdfs_volumes.py # build just one volume (smoke test)
 .venv/bin/python make_pdfs.py           # the per-page reference pipeline (same output path)
 ```
 
@@ -57,11 +62,12 @@ PDF_LIMIT=6              .venv/bin/python make_pdfs_single.py  # quick smoke on 
 | Path | What |
 |------|------|
 | `zensical.toml` | site config (rich extensions, mermaid fence, MathJax) |
-| `docs/` | the committed ~100-page content, assets, MathJax config, `manifest.json` (page order) |
-| `gen_site.py` | regenerates `docs/` (random content — the committed copy is canonical) |
+| `docs/` | the committed content (10 plain + 2 volume-shaped sections), assets, MathJax config, `manifest.json` (page order) |
+| `gen_site.py` | regenerates `docs/` (seeded random content — regeneration reproduces the committed copy byte-for-byte) |
 | `make_pdfs_single.py` | **the production build→PDF pipeline**: single-document render (Playwright + pypdf + reportlab + pikepdf) — see below |
-| `make_pdfs.py` | the per-page **reference implementation** (prints each page, merges, Ghostscript-compresses); shared helpers live here and `make_pdfs_single.py` imports them |
-| `.github/workflows/docs-pdf.yml` | the end-to-end CI pipeline (runs `make_pdfs_single.py`) |
+| `make_pdfs_volumes.py` | **the per-volume pipeline**: the single-render recipe scoped to one section per document → `vol1.pdf` … `volN.pdf` — see below |
+| `make_pdfs.py` | the per-page **reference implementation** (prints each page, merges, Ghostscript-compresses); shared helpers live here and the other two pipelines import them |
+| `.github/workflows/docs-pdf.yml` | the end-to-end CI pipeline (runs both PDF pipelines) |
 
 ## The single-document render (`make_pdfs_single.py`) — why it won
 
@@ -83,3 +89,15 @@ Production hardening applied at promotion (2026-07-08):
 - **Collapsible (`???`) admonitions are forced open** before extraction — print can't click, so collapsed content would otherwise be silently lost.
 - **Marker misses warn loudly** — a heading/figure marker not found in the rendered text layer used to silently map to page 1; now it prints a CI-visible warning.
 - **Crash-safe temp file** — the combined HTML doc is written inside `site/` (which publishes to Pages), so it's removed in a `finally`, not only on success.
+
+## The per-volume render (`make_pdfs_volumes.py`) — the site as a document set
+
+The reverse trip of a document transformation: where a classic controlled document set ships **one self-contained volume per subject** (each with its own title page, contents, numbering from 1, and authored furniture like document control and a glossary), this pipeline produces exactly that from the same built site — one standalone PDF per top-level section, alongside (not instead of) the single manual. Design decisions:
+
+- **One document per section**, named `vol1.pdf` … `volN.pdf`. The site cover belongs to the whole-site manual only; each volume opens with its own generated title page.
+- **Standalone numbering** — inside a volume the section index is section `1`, its topic pages `2`…`N` (their `h2`s become `2.1`, `2.2`, …), and figures restart at `Figure 1`, so every volume reads like a self-contained document.
+- **Pipeline does furniture, content does the rest** — the generated parts are the title page, an exact numbered TOC (topics **and** their `h2`s, read back from the same invisible markers as the single render), a table of figures, running section header + `page/total` footer, and a nested outline. Document-set furniture that carries real information (document control, version history, glossary) is **authored markdown**: sections 11+ of the fixture are generated "volume-shaped" with mock versions of those pages, so both styles can be compared from the same release (`vol1`–`vol10` plain vs `vol11`–`vol12` volume-shaped).
+- **Links that leave a volume** are retargeted at the published site via `PDF_SITE_URL` (same-volume links stay working intra-PDF anchors) — a cross-volume reference in the PDF opens the web page.
+- **Purely additive** — it imports the helpers from `make_pdfs.py` / `make_pdfs_single.py` and modifies neither; the single manual keeps building unchanged. Per-volume renders are ~10 pages each, so peak RAM is trivial next to the full render's ~3.7 GB, and a broken page fails one volume instead of the whole output. `PDF_VOLUME=N` builds a single volume for local iteration.
+
+Measured at full scale (12 volumes, 2026-08-03): **~45 s total, 496 sheets across 12 documents, ~8.1 MB combined**, every TOC/figure page number exact, per-volume internal links working (e.g. 18 in `vol11.pdf`), zero marker misses.

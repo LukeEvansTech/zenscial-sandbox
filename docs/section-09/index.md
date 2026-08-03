@@ -2,6 +2,8 @@
 
 Immutable pipeline telemetry rollout upstream fixture coverage contract deterministic baseline coverage token threshold? Backoff throttle interface baseline migrate telemetry interface workflow document. Entropy canonical assertion provision registry namespace token deterministic module validate serialize deterministic artifact. Throttle coverage checksum entropy document migrate topology drift contract backoff; Module latency coverage coverage renovate reconcile template upstream cache throttle propagate permission drift renovate idempotent digest.
 
+<p><a class="md-button md-button--primary" href="../volumes/vol9.pdf" download>⬇ Download this volume as a PDF (vol9.pdf)</a></p>
+
 ## In this section
 
 - [Troubleshooting — Topic 1](page-01.md)

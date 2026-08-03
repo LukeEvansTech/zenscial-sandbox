@@ -2,6 +2,8 @@
 
 Artifact manifest renovate canonical observability annotate module deterministic; Deterministic manifest config coverage pipeline interface interface workflow permission cache. Manifest immutable latency idempotent reconcile palette backoff gateway observability propagate pipeline workflow architecture baseline deploy. Annotate upstream rollout throughput checksum contract telemetry renovate drift scope migrate token deploy artifact deterministic architecture fixture backoff pipeline interface? Architecture heuristic config config scope cache renovate immutable cache migrate system boundary entropy idempotent.
 
+<p><a class="md-button md-button--primary" href="../volumes/vol7.pdf" download>⬇ Download this volume as a PDF (vol7.pdf)</a></p>
+
 ## In this section
 
 - [Diagrams & Visuals — Topic 1](page-01.md)

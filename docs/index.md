@@ -4,7 +4,7 @@ A synthetic documentation site with **~100 pages** of representative content, ge
 
 <p><a class="md-button md-button--primary" href="manual.pdf" download>⬇ Download this whole site as a PDF</a></p>
 
-*(The PDF is generated in CI by printing this built site with headless Chrome and merging every page — see the `Docs + PDF` workflow.)*
+*(The PDF is generated in CI by printing this built site with headless Chrome and merging every page — see the `Docs + PDF` workflow. Each section is also rendered as a standalone volume document — see the download button on every section index.)*
 
 ![chart illustration](assets/chart.svg)
 
@@ -16,6 +16,7 @@ A synthetic documentation site with **~100 pages** of representative content, ge
 - Mermaid diagrams (flowchart, sequence, class, state, pie)
 - Inline SVG images, math (arithmatex), content tabs, task/def lists
 - Long pages that span multiple printed sheets
+- Volume-shaped sections (11+) with authored document-control, design-decision and glossary pages
 
 
 ## Sections
@@ -30,3 +31,5 @@ A synthetic documentation site with **~100 pages** of representative content, ge
 8. [Automation & CI](section-08/index.md)
 9. [Troubleshooting](section-09/index.md)
 10. [Appendix](section-10/index.md)
+11. [Access Platform Design](section-11/index.md)
+12. [Managed Desktop Design](section-12/index.md)

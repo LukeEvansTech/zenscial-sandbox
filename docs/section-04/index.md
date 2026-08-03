@@ -2,6 +2,8 @@
 
 Migrate coverage namespace throttle lint heuristic boundary reconcile coverage digest permission reconcile cache token. Pipeline digest latency cache scope ephemeral document reconcile heuristic registry baseline migrate interface. Artifact downstream throttle assertion propagate digest telemetry converge throughput artifact deterministic interface token config; Validate reconcile token deploy ephemeral renovate document artifact serialize upstream gateway publish telemetry template converge token. Invariant canonical template canonical workflow drift deterministic workflow immutable render topology manifest checksum template template document scope. Template canonical ephemeral lint migrate contract telemetry schema serialize manifest document latency coverage rollout.
 
+<p><a class="md-button md-button--primary" href="../volumes/vol4.pdf" download>⬇ Download this volume as a PDF (vol4.pdf)</a></p>
+
 ## In this section
 
 - [Build Pipeline — Topic 1](page-01.md)

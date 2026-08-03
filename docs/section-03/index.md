@@ -2,6 +2,8 @@
 
 Latency config namespace provision idempotent rollout immutable converge boundary assertion idempotent renovate. Converge workflow namespace workflow topology render deterministic invariant heuristic digest immutable ephemeral orchestrate fixture canonical template; Permission renovate contract reconcile permission permission renovate topology propagate artifact namespace deterministic digest. Publish interface annotate document entropy fixture assertion cache latency provision;
 
+<p><a class="md-button md-button--primary" href="../volumes/vol3.pdf" download>⬇ Download this volume as a PDF (vol3.pdf)</a></p>
+
 ## In this section
 
 - [Configuration Reference — Topic 1](page-01.md)
