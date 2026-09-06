@@ -1,5 +1,5 @@
 zensical==0.0.59
 playwright==1.62.0
-pypdf==6.16.2
+pypdf==6.17.0
 reportlab==5.0.1
 pikepdf==10.12.0
