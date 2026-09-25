@@ -1,4 +1,4 @@
-zensical==0.0.63
+zensical==0.0.64
 playwright==1.63.0
 pypdf==6.19.0
 reportlab==5.0.1
